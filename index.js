@@ -1,4 +1,6 @@
+
 const botClient = require('bot-client')
+//$env:WS_ENDPOINT="https://ws-bots.teslatele.com/"; nodemon index.js
 
 //mongoDB
 const MongoClient = require('mongodb').MongoClient;
@@ -8,84 +10,138 @@ const assert = require('assert');
 const url = 'mongodb://localhost:27017'
 // только что созданные вами авторизационные данные
 const creds = {
-  email: "",
-  password: ""
+  email: "steve@test.ru",
+  password: "1234"
 }
 var chooseStreamName = [];
+var chooseStreamId = [];
 var streamName = [];
 
-var options = {
-  era: 'long',
-  year: 'numeric',
-  month: 'long',
-  day: 'numeric',
-  // weekday: 'long',
-  // timezone: 'UTC',
-  hour: 'numeric',
-  minute: 'numeric',
-  second: 'numeric'
-};
+// async function connectMongo() {
+//   var mongo = await mongoClient.connect(url); // подключение к монго
+//   //var myAwesomeDB = await mongo.db('clients'); // присваем переменной базу clients
+//   // myAwesomeDB.insert(note);
+//   return;
+// }
+
+var dateTimestamp = new Date().getTime(); // timestamp в мс
+var date = new Date();
 
 const State = {
   waitingNewTitle: false,
-  waitingNewDay: false,
+  waitingNewDay: false, 
   waitingNewBody: false,
   waitingNewStream: false,
   waitingNewNameStream: false,
   waitingNameDelete: false,
   waitingChooseStream: false,
+  waitingNewChooseStream: false,
+  waitingChooseStreamAdmin: false,
+  waitingUserId: false,
+  waitingDeleteId: false,
+  waitingChooseStreamDeleteUser: false,
+
   notes: [],
   context: {},
 };
-// 5a4376e28b3b170015b413a0
+var flag_1 = State.waitingChooseStreamDeleteUser;
+var flag_2 = State.waitingDeleteId;
+
+function timeOut(date) {
+  return (date.getDate() + '.' + '0' + (date.getMonth() + 1) + '.' + date.getFullYear());
+}
 const { comment, thread, stream } = botClient.connect(creds);
 
-function getNotesOfDay(day) {
-  switch (day) {
-    case 'понедельник': {
-      return [{ type: 'text', data: { text: 'нет заметок на понедельник' } }];
-    }
-    case 'вторник': {
-      return [{ type: 'text', data: { text: 'нет заметок на вторник' } }];
-    }
-    case 'среда': {
-      return [{ type: 'text', data: { text: 'нет заметок на среду' } }];
-    }
-    case 'четверг': {
-      return [{ type: 'text', data: { text: 'нет заметок на четверг' } }];
-    }
-    case 'пятница': {
-      return [{ type: 'text', data: { text: 'нет заметок на пятницу' } }];
-    }
-    case 'суббота': {
-      return [{ type: 'text', data: { text: 'нет заметок на субботу' } }];
-    }
-    case 'воскресенье': {
-      return [{ type: 'text', data: { text: 'нет заметок на воскресенье' } }];
-    }
-    default: {
-      return null;
-    }
-  }
+async function createComment(teamId, to, answer) {
+  let att = [{ type: 'text', data: { text: answer } }];
+  await comment.create(teamId, {to, att});
 }
-
-
 
 comment.onDirect(async message => {
   const teamId = message.teamId;
   const to = message.data.content.from;
   const { data: { text } } = message.data.content.att[0];
 
-  if (text.match(/date/)) {
-    var date = new Date();
-    console.log(date);
-    console.log(date.toLocaleString("ru", options));
+//---------------------------------------------------------------------
+//ans - коммент
+async function allStreams(stream, teamId, ans1, flag_1) {
+    const streams = await stream.read(teamId, {}); // считываем все потоки
+    for (var i = 0; i < streams.data.length; i++) {
+      streamName.push(streams.data[i].name); //пушим имена потоков
+    }
+    const answer = ans1 + streamName.join('\n'); //вывод имен потоков списком 
+    await createComment (teamId, to, answer);
+    //flag_1 = true;
+    
     return;
   }
 
+async function chooseStream(stream, teamId, ans2, flag_2) {
+
+    const streams = await stream.read(teamId, {});
+    for ( var i = 0; i < streamName.length; i++) {
+      if (streamName[i] == text) {  //проверка на выбор потока
+        chooseStreamName.push(streamName[i]); //пушим выбранный поток в массив
+      }
+    }
+    await createComment(teamId, to, 'Вы выбрали поток с именем: ' + text);
+    await createComment(teamId, to, ans2);
+    //flag_2 = true;
+
+    return;
+}
+// ------------------------------------------------------------------------------
+  if (text.match(/delete user/)) {
+    const ans1 = 'Выберите поток для удаления пользователя: \n';
+    await allStreams(stream, teamId, ans1, flag_1=true);
+    
+    streamName = [];
+    return;
+  }
+
+  if (flag_1 == true) {
+    flag_1 = false;
+    const ans2 = 'Введите id пользователя:';
+    await chooseStream(stream, teamId, ans2, flag_2=true);
+    return;
+  }
+
+  if (flag_2 == true) {
+    flag_2 = false;
+    var chooseUserId = []; 
+    const streams = await stream.read(teamId, {});
+    for (var i = 0; i < streams.data.length; i++) {
+      if (chooseStreamName[0] == streams.data[i].name) {
+        for (var k = 0; k < streams.data[i].roles.length; k++) {
+        chooseUserId.push(streams.data[i].roles[k]);
+        chooseStreamId.push(streams.data[i]._id);
+        }
+      }
+    }
+    for (var i = 0; i < chooseUserId.length; i++) {
+      if (chooseUserId[i] == text) {//находим пользователя с введенным id для удаления
+        var streamId = chooseStreamId[0];
+        await stream.deleteUser(teamId, {streamId, userId: text});
+        await createComment(teamId, to, 'Пользователь удален с id: ' + text);
+      }
+    }
+        
+    return;
+  }
+  
+//----------------------------------------------------------------------------------
+  if (text.match(/date/)) { //тест вывода даты
+    const answer = timeOut(date);
+    const att = [{ type: 'text', data: { text: 'Дата: ' + answer } }];
+    await comment.create(teamId, { to, att });
+    return;
+  }
+
+ 
+//----------------------------------------------------------------------------------
   if (text.match(/find users/)) {
     console.log('call mongo')
-    const mongo = await MongoClient.connect(url) // подключение к монго
+    const mongo = await mongoClient.connect(url) // подключение к монго
     const myAwesomeDB = await mongo.db('clients') // присваем переменной базу clients
     const answer = await myAwesomeDB.collection('users').find({}).toArray() // в коллекцию users делаем запрос, чтобы вывести все записи 
     const att = [{ type: 'text', data: { text: JSON.stringify(answer) } }]
@@ -94,85 +150,112 @@ comment.onDirect(async message => {
     mongo.close() // закрываеми соединение
   }
 
+//-----------------------------------------------------------------------------
+  // if (text.match(/list notes/)) {
+  //   const answer = State.notes.map(note => note.title).join('\n');
+  //   const att = [{ type: 'text', data: { text: answer } }];
+  //   await comment.create(teamId, { to, att });
+  //   return;
+  // }
+// --------------------------------------------------------------------------
   if (text.match(/new note/)) {
-    const answer = 'Введите день недели';
-    const att = [{ type: 'text', data: { text: answer } }];
-    await comment.create(teamId, { to, att });
-    State.waitingNewDay = true;
+    flag_1 = State.waitingNewChooseStream;
+    flag_2 = State.waitingNewTitle;
+    const ans1 = 'Выберите поток для добавления заметки: \n';
+    await allStreams(stream, teamId, ans1, flag_1=true);
+    
+    streamName = [];
     return;
+    // State.waitingNewChooseStream = true; 
   }
+  // if (State.waitingNewChooseStream == true) {
+  //   State.waitingNewChooseStream = false;
 
-  if (text.match(/list notes/)) {
-    const answer = State.notes.map(note => note.title).join('\n');
-    const att = [{ type: 'text', data: { text: answer } }];
-    await comment.create(teamId, { to, att });
-    return;
-  }
+  //   const streams = await stream.read(teamId, {});
+  //   for ( var i = 0; i < streamName.length; i++) { 
+  //     if (streamName[i] == text) {
+  //       chooseStreamName.push(streamName[i]);
+  //     }
+  //   }
+    
+  //   let att = [{ type: 'text', data: { text: 'Вы выбрали поток с именем: ' + text } }];
+  //   await comment.create(teamId, {to, att});
+  //   att = [{ type: 'text', data: { text: 'Введите имя заметки:' } }];
+  //   await comment.create(teamId, {to, att});
+  //   State.waitingNewTitle = true;
 
-  if (State.waitingNewDay == true) {
-    State.waitingNewDay = false;
-    State.waitingNewTitle = true;
-    State.context.day = text;
-    const answer = 'Введите заголовок';
-    const att = [{ type: 'text', data: { text: answer } }];
-    await comment.create(teamId, { to, att });
-    return;
-  }
+  //   return;
+  // }
 
   if (State.waitingNewTitle == true) {
     State.waitingNewTitle = false;
-    State.waitingNewBody = true;
+    
     State.context.title = text;
-    let title = State.context.title;
-    // console.log('State.context.title > ', State.context.title);
-    const answer = 'Заголовок добавлен, введите текст';
-    const att = [{ type: 'text', data: { text: answer } }];
-    const streamId = '5a5bb04b8b3b170015b4165b';
-    const streamInfo = await stream.read(teamId, {id: streamId});
-    // console.log('streamInfo > ', streamInfo.data[0].threadStatuses[0])
+    let title = State.context.title + ' / ' + timeOut(date);
+
+    const streams = await stream.read(teamId, {});
+    for ( var i = 0; i < streamName.length; i++) {
+      if (chooseStreamName[0] == streams.data[i].name) {
+        chooseStreamId.push(streams.data[i]._id);
+      }
+    }
+    var streamId = chooseStreamId[0];
+    var streamInfo = await stream.read(teamId, {id: streamId});
     await thread.create(teamId, {streamId, title, statusId: `${streamInfo.data[0].threadStatuses[0]}`});
+    console.log('status >', streamInfo.data[0].threadStatuses[0]);
+    const att = [{ type: 'text', data: { text: 'Заголовок добавлен, введите описание:' } }];
     await comment.create(teamId, { to, att });
+    // ---------------------------------------------------
+    const mongo = await MongoClient.connect(url);
+    const myAwesomeDB = await mongo.db('botNotes');
+    const addToCollection = await myAwesomeDB.collection('documents').insert({title: title});
+    
+    const answerFromMongo = await myAwesomeDB.collection('documents').find({}).toArray();
+    console.log(answerFromMongo);
+    await createComment(teamId, to, JSON.stringify(answerFromMongo));
+  
+    State.waitingNewBody = true; 
     return;
   }
 
   if (State.waitingNewBody == true) {
     State.waitingNewBody = false;
     State.context.body = text;
-    const streamId = '5a5bb04b8b3b170015b4165b';
-    const streamInfo = await stream.read(teamId, {id: streamId});
     let body = State.context.body;
     State.context = {};
     State.notes.push(State.context);
-    const answer = 'Заметка создана';
-    const att = [{ type: 'text', data: { text: answer } }];
     await thread.setDescription(teamId, {streamId, content: JSON.stringify(body)});
-    await comment.create(teamId, { to, att });
+    const ans =  'Заметка создана';
+    await createComment(teamId, to, ans);
+    
+    
+    // let a = {description: body};
+    // await connectMongo(a);
+    //console.log(a);
     return;
   }
 
-  if (
-    [ 'понедельник',
-      'вторник',
-      'среда',
-      'четверг',
-      'пятница',
-      'суббота',
-      'воскресенье',
-    ].indexOf(text) !== -1
-  ) {
-    const att = getNotesOfDay(text);
-    await comment.create(teamId, { to, att });
+
+//------------------------------------------------------------
+  if (text.match(/list thread/)) {
+    var listThread = [];
+    const threads = await thread.read(teamId, {});
+    for (var i = 0; i < threads.data.length; i++) {
+      listThread.push(threads.data[i].title);
+    }
+    const att = [{ type: 'text', data: { text: 'Список заметок:\n' + listThread.join('\n')} }];
+    await comment.create(teamId, {to, att});
+    var users = [{name: "Bob", age: 34} , {name: "Alice", age: 21}, {name: "Tom", age: 45}];
+    mongoClient.connect(url);
+      db.collection("users").insertMany(users);
+        console.log(users);
+        db.close();
+        
     return;
-  } 
-  //else {
-  //   const answer = 'Введите день недели: \n понедельник \n вторник \n среда \n четверг \n пятница \n суббота \n воскресенье';
-  //   const att = [{ type: 'text', data: { text: answer } }];
-  // }
-  // if (text.match(/get stream/)) {
-  //   const res = await stream.read(teamId, {id: '5a4376e28b3b170015b413a0'})
-  //   const att = [{type: 'text', data: {text: JSON.stringify(res)}}]
-  //   await comment.create(teamId, {to, att})
-  // }
+  }
+
+
+//-----------------------------------------------------------------
   if (text.match(/create stream/)) {
     const att = [{ type: 'text', data: { text: 'Введите название потока:' } }];
     await comment.create(teamId, {to, att})
@@ -183,7 +266,7 @@ comment.onDirect(async message => {
     State.waitingNewStream = false;
     const streams = await stream.read(teamId, {});
     var k = 0;
-    for (var i=0; i<streams.data.length; i++){
+    for (var i = 0; i < streams.data.length; i++){
       if ((streams.data[i].admins[0] == message.data.content.to[0]) && (streams.data[i].name == text)){
         k++
       }
@@ -202,31 +285,76 @@ comment.onDirect(async message => {
     }
     return;
   }
-  // if (text.match(/create stream/)) {
-  //     const name = 'новый стрим'
-  //     const res = await stream.create(teamId, {name : name})
-  //     streamId = res.data.id
-  //     stream.setUser(teamId, {id: streamId, userId: to})
-  //     stream.setAdmin(teamId, {id: streamId, userId: to})
-  //     const att = [{type: 'text', data: {text: JSON.stringify(res)}}]
-  //     await comment.create(teamId, {to, att})
-  // } 
-  if (text.match(/new thread/)) {
-      const statusId = await stream.read(teamId, {id: streamId})
-      const status = statusId.data[0].threadStatuses[0]
-      const res = await thread.create(teamId, {
-        statusId: status,
-        streamId: streamId,
-        title: 'new thread'
-      })
+
+
+//---------------------------------------------------------------------
+  if (text.match(/set admin/)) {
+    const streams = await stream.read(teamId, {});
+    for (var i = 0; i < streams.data.length; i++) {
+      streamName.push(streams.data[i].name)
+    }
+    const answer = 'Выберите поток для назначения админа: \n' + streamName.join('\n');
+    const att = [{ type: 'text', data: { text: answer } }];
+    await comment.create(teamId, { to, att });
+    State.waitingChooseStreamAdmin = true;
+
+    return;
+  }
+  if (State.waitingChooseStreamAdmin == true) {
+    State.waitingChooseStreamAdmin = false;
+    const streams = await stream.read(teamId, {});
+    for ( var i = 0; i < streamName.length; i++) {
+      if (streamName[i] == text) {
+        chooseStreamName.push(streamName[i]);
+      } 
+    }
+    let att = [{ type: 'text', data: { text: 'Вы выбрали поток с именем: ' + text } }];
+    await comment.create(teamId, {to, att});
+    att = [{ type: 'text', data: { text: 'Введите id пользователя:' } }];
+    await comment.create(teamId, {to, att});
+    State.waitingUserId = true;
+
+    return;
   }
 
-  if (text.match(/read bots/)) { // считывает все streams
-      const res = await stream.read(teamId, {})
-      console.log (res)
-      const att = [ {type:'text', data:{text: JSON.stringify(res) } } ];
-      await comment.create(teamId, {to, att})
+  if (State.waitingUserId == true) {
+    State.waitingUserId = false;
+    var chooseUserId = [];
+    const streams = await stream.read(teamId, {});
+    for (var i = 0; i < streams.data.length; i++) {
+      if (chooseStreamName[0] == streams.data[i].name) {
+        for (var k = 0; k < streams.data[i].roles.length; k++) {
+        chooseUserId.push(streams.data[i].roles[k]);
+        chooseStreamId.push(streams.data[i]._id);
+        }
+        
+      }
+    }
+    for (var i = 0; i < chooseUserId.length; i++) {
+      if (chooseUserId[i] == text) {
+       
+        var streamId = chooseStreamId[0];
+        await stream.setAdmin(teamId, {streamId, userId: text});
+        const att = [{ type: 'text', data: { text: 'Админ назначен с id: ' + text } }];
+        await comment.create(teamId, { to, att });
+      }
+    }
+        
+    return;
   }
+
+
+  
+
+  // if (text.match(/new thread/)) {
+  //     const statusId = await stream.read(teamId, {id: streamId})
+  //     const status = statusId.data[0].threadStatuses[0]
+  //     const res = await thread.create(teamId, {
+  //       statusId: status,
+  //       streamId: streamId,
+  //       title: 'new thread'
+  //     })
+  // }
 
 //----------------------------------------------------------------------------
     if (text.match(/delete stream/)) {
@@ -318,5 +446,7 @@ comment.onDirect(async message => {
     }
     return;
   } 
+ 
+
 
 });
